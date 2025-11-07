@@ -19,9 +19,23 @@ import (
 // Dial dials a new TCP connection to the given destination.
 func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.MemoryStreamConfig) (stat.Connection, error) {
 	errors.LogInfo(ctx, "dialing TCP to ", dest)
-	conn, err := internet.DialSystem(ctx, dest, streamSettings.SocketSettings)
-	if err != nil {
-		return nil, err
+	
+	tcpSettings := streamSettings.ProtocolSettings.(*Config)
+	var conn net.Conn
+	var err error
+	
+	// 检查是否启用多路径
+	if tcpSettings.MultiPath != nil && tcpSettings.MultiPath.Enabled && tcpSettings.MultiPath.ConnectionCount > 1 {
+		errors.LogInfo(ctx, "using multipath with ", tcpSettings.MultiPath.ConnectionCount, " connections")
+		conn, err = NewMultiPathConn(ctx, dest, streamSettings, tcpSettings.MultiPath.ConnectionCount)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		conn, err = internet.DialSystem(ctx, dest, streamSettings.SocketSettings)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if config := tls.ConfigFromStreamSettings(streamSettings); config != nil {
@@ -92,7 +106,6 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.Me
 		}
 	}
 
-	tcpSettings := streamSettings.ProtocolSettings.(*Config)
 	if tcpSettings.HeaderSettings != nil {
 		headerConfig, err := tcpSettings.HeaderSettings.GetInstance()
 		if err != nil {
